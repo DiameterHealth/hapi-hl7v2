@@ -77,7 +77,9 @@ public abstract class XMLParser extends Parser {
 	private static final String ESCAPE_NODENAME = "escape";
 	private static final Logger log = LoggerFactory.getLogger(XMLParser.class);
     protected static final String NS = "urn:hl7-org:v2xml";
-    private static final Pattern NS_PATTERN = Pattern.compile("xmlns(.*)=\"" + NS + "\"");
+	// The original NS_PATTERN was too greedy - it would improperly capture too much.
+	// This updated NS_PATTERN will only check the immediate value.
+    private static final Pattern NS_PATTERN = Pattern.compile("xmlns([^=]*?)=\"" + NS + "\"");
 
 	private String textEncoding;
 
@@ -204,7 +206,16 @@ public abstract class XMLParser extends Parser {
 	 */
 	protected synchronized Document parseStringIntoDocument(String message) throws HL7Exception {
 		try {
-			return XMLUtils.parse(message);
+			// We need to guarantee that the default namespace for HL7v2 messages (urn:hl7-org:v2xml) is present.
+			// This is done by first parsing the message, figuring out that the namespaceURI is not correct, and
+			// then setting it properly before reparsing it and sending back the DOM.
+			Document dom = XMLUtils.parse(message);
+			if (!NS.equals(dom.getDocumentElement().getNamespaceURI())) {
+				String rootTagName = dom.getDocumentElement().getTagName();
+				message = message.replaceFirst("<" + rootTagName + " ", "<" + rootTagName + " xmlns=\"" + NS + "\" ");
+				dom = XMLUtils.parse(message);
+			}
+			return dom;
 		} catch (Exception e) {
 			throw new HL7Exception("Exception parsing XML", e);
 		}
@@ -269,7 +280,8 @@ public abstract class XMLParser extends Parser {
 
     protected void assertNamespaceURI(String ns) throws HL7Exception {
         if (!NS.equals(ns)) {
-            throw new HL7Exception("Namespace URI must be " + NS);
+			// Added better error message when the Namespace URI is incorrect.
+            throw new HL7Exception("Namespace URI must be " + NS + ", not " + ns);
         }
     }
 
